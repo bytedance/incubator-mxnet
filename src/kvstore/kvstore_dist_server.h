@@ -728,6 +728,7 @@ class KVStoreDistServer {
   void DataHandleDefault(const DataHandleType type, const ps::KVMeta& req_meta,
                          const ps::KVPairs<char> &req_data,
                          ps::KVServer<char>* server) {
+    std::lock_guard<std::mutex> lock(engine_mu_);
     // do some check
     CHECK_EQ(req_data.keys.size(), (size_t)1);
     if (req_meta.push) {
@@ -885,6 +886,8 @@ class KVStoreDistServer {
   bool multi_precision_;
 
   bool update_buf_wait_;
+
+  std::mutex engine_mu_;
 
   CpuReducer bps_reducer_;
 
