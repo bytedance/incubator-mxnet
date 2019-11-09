@@ -622,6 +622,7 @@ class KVStoreDistServer {
       else {
         response->vals.CopyFrom(static_cast<const char*>(stored.data().dptr_), len);
       }
+      std::lock_guard<std::mutex> lock(engine_mu_);
       Engine::Get()->PushAsync(
             [this, server, &req_meta, response](RunContext ctx, Engine::CallbackOnComplete on_complete) {
               server->Response(req_meta, *response);
@@ -800,6 +801,7 @@ class KVStoreDistServer {
             CopyFromTo(recved, updates.temp_array);
             updates.merged += updates.temp_array;
           } else {
+            std::lock_guard<std::mutex> lock(engine_mu_);
             Engine::Get()->PushAsync(
             [this, updates, recved](RunContext ctx, Engine::CallbackOnComplete on_complete) {
               CHECK_GE(bps_reducer_.sum(bps_reducer_.GetData(&updates.merged), bps_reducer_.GetData(&recved),
@@ -876,6 +878,8 @@ class KVStoreDistServer {
   bool multi_precision_;
 
   bool update_buf_wait_;
+
+  std::mutex engine_mu_;
 
   CpuReducer bps_reducer_;
 
