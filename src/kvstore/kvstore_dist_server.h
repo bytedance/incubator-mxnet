@@ -616,18 +616,27 @@ class KVStoreDistServer {
     else { // not new key, then reuse the memory address to avoid ibv_reg_mr on RDMA data path
       ps::KVPairs<char> *response = &iterator->second;
       // keys and lens remain unchanged, just update vals
+      auto p = static_cast<char*>(stored.data().dptr_);
       if(enable_pull_zero_copy_) {
-        response->vals = ps::SArray<char>(static_cast<char*>(stored.data().dptr_), len, false); // enable zero copy
+        Engine::Get()->PushAsync(
+              [this, server, req_meta, response, p, len](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+                // enable zero copy
+                CHECK(p);
+                response->vals = ps::SArray<char>(p, len, false); 
+                server->Response(req_meta, *response);
+                on_complete();
+              }, stored.ctx(), {stored.var()}, {},
+              FnProperty::kCPUPrioritized, 0, "BYTEPS_SEND_PULL_RESPONSE");
       }
       else {
-        response->vals.CopyFrom(static_cast<const char*>(stored.data().dptr_), len);
+        Engine::Get()->PushAsync(
+              [this, server, req_meta, response, p, len](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+                response->vals.CopyFrom(static_cast<const char*>(p), len);
+                server->Response(req_meta, *response);
+                on_complete();
+              }, stored.ctx(), {stored.var()}, {},
+              FnProperty::kCPUPrioritized, 0, "BYTEPS_SEND_PULL_RESPONSE");
       }
-      Engine::Get()->PushAsync(
-            [this, server, req_meta, response](RunContext ctx, Engine::CallbackOnComplete on_complete) {
-              server->Response(req_meta, *response);
-              on_complete();
-            }, stored.ctx(), {stored.var()}, {},
-            FnProperty::kCPUPrioritized, 0, "BYTEPS_SEND_PULL_RESPONSE");
     }
   }
 
