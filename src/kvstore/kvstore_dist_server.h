@@ -42,6 +42,7 @@
 #include "../profiler/profiler.h"
 #include "../operator/tensor/elemwise_binary_op-inl.h"
 #include "../operator/tensor/init_op.h"
+#include "cpu_reducer.h"
 
 namespace mxnet {
 namespace kvstore {
@@ -183,6 +184,8 @@ class KVStoreDistServer {
     if (!sync_mode_) {
       LOG(INFO) << "BytePS server is enabled asynchronous training";
     }
+
+    LOG(INFO) << "---------------- Add this line to verify it is working ----------------"; 
   }
 
   ~KVStoreDistServer() {
@@ -235,10 +238,7 @@ class KVStoreDistServer {
         break;
       case CommandType::kSetMultiPrecision:
         // uses value 1 for message id from frontend
-        if (!multi_precision_) {
-          multi_precision_ = true;
-          CreateMultiPrecisionCopies();
-        }
+        CHECK(0) << "kSetMultiPrecision is not available now";
         break;
       case CommandType::kController:
         // this uses value 0 for message id from frontend
@@ -375,10 +375,7 @@ class KVStoreDistServer {
 
       if (has_multi_precision_copy(type)) CopyFromTo(stored, store_[key]);
       update_buf->request.clear();
-      stored.WaitToRead();
-    } else {
-      update_buf->merged.WaitToRead();
-    }
+    } 
   }
 
   void DecodeRowIds(const ps::SArray<ps::Key> &keys, int64_t *indices,
@@ -619,13 +616,27 @@ class KVStoreDistServer {
     else { // not new key, then reuse the memory address to avoid ibv_reg_mr on RDMA data path
       ps::KVPairs<char> *response = &iterator->second;
       // keys and lens remain unchanged, just update vals
+      auto p = static_cast<char*>(stored.data().dptr_);
       if(enable_pull_zero_copy_) {
-        response->vals = ps::SArray<char>(static_cast<char*>(stored.data().dptr_), len, false); // enable zero copy
+        Engine::Get()->PushAsync(
+              [this, server, req_meta, response, p, len](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+                // enable zero copy
+                CHECK(p);
+                response->vals = ps::SArray<char>(p, len, false); 
+                server->Response(req_meta, *response);
+                on_complete();
+              }, stored.ctx(), {stored.var()}, {}, 
+              FnProperty::kNormal, 0, "BYTEPS_SEND_PULL_RESPONSE"); // should avoid racing
       }
       else {
-        response->vals.CopyFrom(static_cast<const char*>(stored.data().dptr_), len);
+        Engine::Get()->PushAsync(
+              [this, server, req_meta, response, p, len](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+                response->vals.CopyFrom(static_cast<const char*>(p), len);
+                server->Response(req_meta, *response);
+                on_complete();
+              }, stored.ctx(), {stored.var()}, {}, 
+              FnProperty::kNormal, 0, "BYTEPS_SEND_PULL_RESPONSE"); // should avoid racing
       }
-      server->Response(req_meta, *response);
     }
   }
 
@@ -717,6 +728,7 @@ class KVStoreDistServer {
   void DataHandleDefault(const DataHandleType type, const ps::KVMeta& req_meta,
                          const ps::KVPairs<char> &req_data,
                          ps::KVServer<char>* server) {
+    std::lock_guard<std::mutex> lock(engine_mu_);
     // do some check
     CHECK_EQ(req_data.keys.size(), (size_t)1);
     if (req_meta.push) {
@@ -798,7 +810,13 @@ class KVStoreDistServer {
             CopyFromTo(recved, updates.temp_array);
             updates.merged += updates.temp_array;
           } else {
-            updates.merged += recved;
+            Engine::Get()->PushAsync(
+            [this, updates, recved](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+              CHECK_GE(bps_reducer_.sum(bps_reducer_.GetData(&updates.merged), bps_reducer_.GetData(&recved),
+                                        bps_reducer_.GetSize(&recved), bps_reducer_.GetDType(&recved)), 0);
+              on_complete();
+            }, updates.merged.ctx(), {recved.var()}, {updates.merged.var()},
+            FnProperty::kCPUPrioritized, 0, "BYTEPS_SUMMATION");
           }
         }
         // add a worker information (request.size() is the # workers received)
@@ -868,6 +886,10 @@ class KVStoreDistServer {
   bool multi_precision_;
 
   bool update_buf_wait_;
+
+  std::mutex engine_mu_;
+
+  CpuReducer bps_reducer_;
 
   /*
    * send push response with the key as value
