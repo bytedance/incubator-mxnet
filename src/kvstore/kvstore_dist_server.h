@@ -809,7 +809,7 @@ class KVStoreDistServer {
                                         bps_reducer_.GetSize(&recved), bps_reducer_.GetDType(&recved)), 0);
               on_complete();
             }, updates.merged.ctx(), {recved.var()}, {updates.merged.var()},
-            FnProperty::kNormal, 0, "BYTEPS_SUMMATION");
+            FnProperty::kCPUPrioritized, 0, "BYTEPS_SUMMATION");
           }
         }
         // add a worker information (request.size() is the # workers received)
