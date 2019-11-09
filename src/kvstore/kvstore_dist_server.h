@@ -614,7 +614,7 @@ class KVStoreDistServer {
               server->Response(req_meta, response);
               on_complete();
             }, stored.ctx(), {stored.var()}, {},
-            FnProperty::kNormal, 0, "BYTEPS_SEND_PULL_RESPONSE");
+            FnProperty::kCPUPrioritized, 0, "BYTEPS_SEND_PULL_RESPONSE");
     }
     else { // not new key, then reuse the memory address to avoid ibv_reg_mr on RDMA data path
       ps::KVPairs<char> *response = &iterator->second;
@@ -630,7 +630,7 @@ class KVStoreDistServer {
               server->Response(req_meta, *response);
               on_complete();
             }, stored.ctx(), {stored.var()}, {},
-            FnProperty::kNormal, 0, "BYTEPS_SEND_PULL_RESPONSE");
+            FnProperty::kCPUPrioritized, 0, "BYTEPS_SEND_PULL_RESPONSE");
     }
   }
 
