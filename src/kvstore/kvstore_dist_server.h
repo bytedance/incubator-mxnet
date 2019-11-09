@@ -623,7 +623,7 @@ class KVStoreDistServer {
         response->vals.CopyFrom(static_cast<const char*>(stored.data().dptr_), len);
       }
       Engine::Get()->PushAsync(
-            [this, &req_meta, &response](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+            [this, &req_meta, response](RunContext ctx, Engine::CallbackOnComplete on_complete) {
               server->Response(req_meta, *response);
               on_complete();
             }, stored.ctx(), {stored.var()}, {},
