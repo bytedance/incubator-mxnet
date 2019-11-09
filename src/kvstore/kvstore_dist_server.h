@@ -373,10 +373,7 @@ class KVStoreDistServer {
 
       if (has_multi_precision_copy(type)) CopyFromTo(stored, store_[key]);
       update_buf->request.clear();
-      stored.WaitToRead();
-    } else {
-      update_buf->merged.WaitToRead();
-    }
+    } 
   }
 
   void DecodeRowIds(const ps::SArray<ps::Key> &keys, int64_t *indices,
@@ -612,7 +609,12 @@ class KVStoreDistServer {
         response.vals.CopyFrom(static_cast<const char*>(stored.data().dptr_), len);
       }
       server_response_map[key] = response; // add to the map
-      server->Response(req_meta, response);
+      Engine::Get()->PushAsync(
+            [server, req_meta, response](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+              server->Response(req_meta, response);
+              on_complete();
+            }, stored.ctx(), {stored.var()}, {},
+            FnProperty::kNormal, 0, "BYTEPS_SEND_PULL_RESPONSE");
     }
     else { // not new key, then reuse the memory address to avoid ibv_reg_mr on RDMA data path
       ps::KVPairs<char> *response = &iterator->second;
@@ -623,7 +625,12 @@ class KVStoreDistServer {
       else {
         response->vals.CopyFrom(static_cast<const char*>(stored.data().dptr_), len);
       }
-      server->Response(req_meta, *response);
+      Engine::Get()->PushAsync(
+            [server, req_meta, response](RunContext ctx, Engine::CallbackOnComplete on_complete) {
+              server->Response(req_meta, *response);
+              on_complete();
+            }, stored.ctx(), {stored.var()}, {},
+            FnProperty::kNormal, 0, "BYTEPS_SEND_PULL_RESPONSE");
     }
   }
 
